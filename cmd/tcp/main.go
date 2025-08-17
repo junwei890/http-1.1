@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	listener, err := net.Listen("tcp", ":8080")
+	listener, err := net.Listen("tcp", ":42069")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -20,8 +20,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		fmt.Println("Connection accepted")
 
-		lines := getLinesChannel(conn) // conn implements read and write
+		lines := readRequest(conn) // conn implements read and write
 		for line := range lines {
 			fmt.Println(line)
 		}
@@ -30,7 +31,7 @@ func main() {
 	}
 }
 
-func getLinesChannel(r io.ReadCloser) <-chan string {
+func readRequest(r io.ReadCloser) <-chan string {
 	channel := make(chan string)
 
 	go func() {
