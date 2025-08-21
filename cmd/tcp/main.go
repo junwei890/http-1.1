@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/junwei890/http-1.1/internal/request"
 )
 
 func main() {
@@ -14,6 +14,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+	fmt.Println("Listening for requests")
 
 	for {
 		conn, err := listener.Accept()
@@ -22,40 +23,16 @@ func main() {
 		}
 		fmt.Println("Connection accepted")
 
-		lines := readRequest(conn) // conn implements read and write
-		for line := range lines {
-			fmt.Println(line)
+		req, err := request.RequestParser(conn)
+		if err != nil {
+			log.Fatal(err)
 		}
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
 
 		conn.Close()
 	}
-}
-
-func readRequest(r io.ReadCloser) <-chan string {
-	channel := make(chan string)
-
-	go func() {
-		defer close(channel)
-
-		line := ""
-		for {
-			buffer := make([]byte, 8)
-			if _, err := r.Read(buffer); err != nil && err != io.EOF {
-				log.Fatal(err)
-			} else if err == io.EOF { // eof is for when no bytes are read
-				break
-			}
-
-			parts := strings.Split(string(buffer), "\n")
-			for i, part := range parts {
-				line += part
-				if i != (len(parts) - 1) {
-					channel <- line
-					line = ""
-				}
-			}
-		}
-	}()
-
-	return channel
 }

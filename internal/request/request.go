@@ -1,6 +1,7 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +15,8 @@ type RequestLine struct {
 
 type Request struct {
 	RequestLine RequestLine
+	Initialised bool
+	Done        bool
 }
 
 var validMethods map[string]struct{} = map[string]struct{}{
@@ -28,48 +31,93 @@ var validMethods map[string]struct{} = map[string]struct{}{
 	"TRACE":   {},
 }
 
-func parseRequestLine(requestLine string) (*RequestLine, error) {
-	parts := strings.Split(requestLine, " ")
-	if len(parts) != 3 {
-		return &RequestLine{}, fmt.Errorf("request line requires 3 parts, only have %d", len(parts))
+func (r *Request) parse(data []byte) (int, error) {
+	if r.Initialised {
+		rl, n, err := parseRequestLine(string(data))
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			// if no bytes were parsed
+			return 0, nil
+		}
+
+		r.RequestLine = *rl
+		r.Done = true
+
+		return n, nil
 	}
 
-	if _, ok := validMethods[parts[0]]; !ok {
-		return &RequestLine{}, fmt.Errorf("%s method not supported", parts[0])
+	if r.Done {
+		return 0, errors.New("reading data in a done state")
 	}
 
-	if !strings.HasPrefix(parts[1], "/") {
-		return &RequestLine{}, fmt.Errorf("%s is an invalid route", parts[1])
+	return 0, errors.New("unknown state")
+}
+
+func parseRequestLine(input string) (*RequestLine, int, error) {
+	requestParts := strings.Split(input, "\r\n")
+	if len(requestParts) < 2 {
+		return nil, 0, nil
 	}
 
-	if parts[2] != "HTTP/1.1" {
-		return &RequestLine{}, fmt.Errorf("%s is an unsupported protocol or version", parts[2])
+	requestLineParts := strings.Split(requestParts[0], " ")
+	if len(requestLineParts) != 3 {
+		return nil, 0, fmt.Errorf("request line requires 3 parts, only have %d", len(requestLineParts))
+	}
+
+	if _, ok := validMethods[requestLineParts[0]]; !ok {
+		return nil, 0, fmt.Errorf("%s method not supported", requestLineParts[0])
+	}
+
+	if !strings.HasPrefix(requestLineParts[1], "/") {
+		return nil, 0, fmt.Errorf("%s is an invalid route", requestLineParts[1])
+	}
+
+	if requestLineParts[2] != "HTTP/1.1" {
+		return nil, 0, fmt.Errorf("%s is an unsupported protocol or version", requestLineParts[2])
 	}
 
 	return &RequestLine{
-		HttpVersion:   strings.Split(parts[2], "/")[1],
-		RequestTarget: parts[1],
-		Method:        parts[0],
-	}, nil
+		HttpVersion:   strings.Split(requestLineParts[2], "/")[1],
+		RequestTarget: requestLineParts[1],
+		Method:        requestLineParts[0],
+	}, len([]byte(input)), nil
 }
 
 func RequestParser(reader io.Reader) (*Request, error) {
-	request, err := io.ReadAll(reader)
-	if err != nil {
-		return &Request{}, err
+	buffer := make([]byte, 8)
+	read := 0
+	req := &Request{
+		Initialised: true,
 	}
 
-	requestParts := strings.Split(string(request), "\r\n")
-	if len(requestParts) < 3 {
-		return &Request{}, fmt.Errorf("request requires minimum 3 parts, only have %d", len(requestParts))
+	for !req.Done {
+		if len(buffer) == cap(buffer) {
+			newBuffer := make([]byte, 2*len(buffer))
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
+
+		// reads sections of reader into sections of buffer as it grows
+		bytesRead, err := reader.Read(buffer[read:])
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if err == io.EOF {
+			req.Done = true
+			break
+		}
+		read += bytesRead
+
+		bytesParsed, err := req.parse(buffer[:read])
+		if err != nil {
+			return nil, err
+		}
+		// if bytesParsed > 0, this will always turn buffer into an empty slice
+		copy(buffer, buffer[bytesParsed:read])
+		read -= bytesParsed
 	}
 
-	requestLine, err := parseRequestLine(requestParts[0])
-	if err != nil {
-		return &Request{}, err
-	}
-
-	return &Request{
-		RequestLine: *requestLine,
-	}, nil
+	return req, nil
 }
