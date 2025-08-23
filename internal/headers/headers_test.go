@@ -39,13 +39,13 @@ func TestHeaderParse(t *testing.T) {
 	assert.False(t, done)
 
 	// test: repeated header with existing headers
-	data = []byte("Content-Type: text/html\r\n")
+	data = []byte("Content-Type: text/html\r\n\r\n")
 	n, done, err = headers.Parse(data)
 	require.NoError(t, err)
 	require.NotNil(t, headers)
 	assert.Equal(t, "application/json, text/html", headers["content-type"])
-	assert.Equal(t, 25, n)
-	assert.False(t, done)
+	assert.Equal(t, 27, n)
+	assert.True(t, done)
 
 	// test: header with no optional whitespace
 	headers = NewHeaders()
