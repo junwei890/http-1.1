@@ -4,6 +4,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/junwei890/http-1.1/internal/headers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,9 +31,9 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 }
 
 func TestRequestLineParse(t *testing.T) {
-	// test: good get request line
+	// test: good get request line, no headers
 	reader := &chunkReader{
-		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "GET / HTTP/1.1\r\n\r\n",
 		numBytesPerRead: 1,
 	}
 	r, err := RequestParser(reader)
@@ -41,10 +42,26 @@ func TestRequestLineParse(t *testing.T) {
 	assert.Equal(t, "GET", r.RequestLine.Method)
 	assert.Equal(t, "/", r.RequestLine.RequestTarget)
 	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, headers.Headers{}, r.Headers)
 
-	// test: good get request line with path
+	// test: good get request line, good headers
 	reader = &chunkReader{
-		data:            "GET /cats HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "GET / HTTP/1.1\r\nHost:localhost:42069\r\nUser-Agent:curl/7.81.0\r\nAccept:*/*\r\n\r\n",
+		numBytesPerRead: 1,
+	}
+	r, err = RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "GET", r.RequestLine.Method)
+	assert.Equal(t, "/", r.RequestLine.RequestTarget)
+	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, "localhost:42069", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
+
+	// test: good get request line with path, good headers with whitespace
+	reader = &chunkReader{
+		data:            "GET /cats HTTP/1.1\r\n Host: localhost:42069 \r\n User-Agent: curl/7.81.0 \r\n Accept: */* \r\n\r\n",
 		numBytesPerRead: 4,
 	}
 	r, err = RequestParser(reader)
@@ -53,10 +70,13 @@ func TestRequestLineParse(t *testing.T) {
 	assert.Equal(t, "GET", r.RequestLine.Method)
 	assert.Equal(t, "/cats", r.RequestLine.RequestTarget)
 	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, "localhost:42069", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
 
-	// test: good post request line with path
+	// test: good post request line with path, good headers with whitespace
 	reader = &chunkReader{
-		data:            "POST /cats HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept */*\r\n\r\n",
+		data:            "POST /cats HTTP/1.1\r\n Host: localhost:42069 \r\n User-Agent: curl/7.81.0 \r\n Accept: */* \r\n\r\n",
 		numBytesPerRead: 8,
 	}
 	r, err = RequestParser(reader)
@@ -65,6 +85,23 @@ func TestRequestLineParse(t *testing.T) {
 	assert.Equal(t, "POST", r.RequestLine.Method)
 	assert.Equal(t, "/cats", r.RequestLine.RequestTarget)
 	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, "localhost:42069", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
+
+	// test: good get request line with path, good duplicate headers
+	reader = &chunkReader{
+		data:            "GET /cats HTTP/1.1\r\nHost: localhost:42069\r\nContent-Type: application/json\r\nContent-Type: text/html\r\n\r\n",
+		numBytesPerRead: 8,
+	}
+	r, err = RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "GET", r.RequestLine.Method)
+	assert.Equal(t, "/cats", r.RequestLine.RequestTarget)
+	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, "localhost:42069", r.Headers["host"])
+	assert.Equal(t, "application/json, text/html", r.Headers["content-type"])
 
 	// test: invalid number of parts in request line
 	reader = &chunkReader{
@@ -84,8 +121,24 @@ func TestRequestLineParse(t *testing.T) {
 
 	// test: invalid http version
 	reader = &chunkReader{
-		data:            "GET /cats HTTP/1.2\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept */*\r\n\r\n",
+		data:            "GET /cats HTTP/1.2\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
 		numBytesPerRead: 64,
+	}
+	_, err = RequestParser(reader)
+	require.Error(t, err)
+
+	// test: whitespace between field name and colon
+	reader = &chunkReader{
+		data:            "GET /cats HTTP/1.1\r\nHost : localhost:42069\r\n\r\n",
+		numBytesPerRead: 64,
+	}
+	_, err = RequestParser(reader)
+	require.Error(t, err)
+
+	// test: invalid character in field name
+	reader = &chunkReader{
+		data:            "GET /cats HTTP/1.1\r\nH<st: localhost:42069\r\n\r\n",
+		numBytesPerRead: 1,
 	}
 	_, err = RequestParser(reader)
 	require.Error(t, err)
