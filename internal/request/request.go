@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/junwei890/http-1.1/internal/headers"
 )
 
 type RequestLine struct {
@@ -13,10 +15,18 @@ type RequestLine struct {
 	Method        string
 }
 
+type parserState string
+
+const (
+	stateRequestLine parserState = "request line"
+	stateHeaders     parserState = "headers"
+	stateDone        parserState = "done"
+)
+
 type Request struct {
-	RequestLine RequestLine
-	Initialised bool
-	Done        bool
+	RequestLine        RequestLine
+	Headers            headers.Headers
+	CurrentParserState parserState
 }
 
 var validMethods map[string]struct{} = map[string]struct{}{
@@ -32,31 +42,39 @@ var validMethods map[string]struct{} = map[string]struct{}{
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.Initialised {
-		rl, n, err := parseRequestLine(string(data))
+	switch r.CurrentParserState {
+	case stateRequestLine:
+		rl, n, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
 		}
 		if n == 0 {
-			// if no bytes were parsed
 			return 0, nil
 		}
 
+		r.CurrentParserState = stateHeaders
 		r.RequestLine = *rl
-		r.Done = true
 
 		return n, nil
-	}
+	case stateHeaders:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.CurrentParserState = stateDone
+		}
 
-	if r.Done {
-		return 0, errors.New("reading data in a done state")
+		return n, nil
+	case stateDone:
+		return 0, errors.New("parsing in a done state")
+	default:
+		return 0, errors.New("unknown state")
 	}
-
-	return 0, errors.New("unknown state")
 }
 
-func parseRequestLine(input string) (*RequestLine, int, error) {
-	requestParts := strings.Split(input, "\r\n")
+func parseRequestLine(data []byte) (*RequestLine, int, error) {
+	requestParts := strings.Split(string(data), "\r\n")
 	if len(requestParts) < 2 {
 		return nil, 0, nil
 	}
@@ -82,18 +100,20 @@ func parseRequestLine(input string) (*RequestLine, int, error) {
 		HttpVersion:   strings.Split(requestLineParts[2], "/")[1],
 		RequestTarget: requestLineParts[1],
 		Method:        requestLineParts[0],
-	}, len([]byte(input)), nil
+	}, len([]byte(requestParts[0])) + 2, nil
 }
 
 func RequestParser(reader io.Reader) (*Request, error) {
 	buffer := make([]byte, 8)
 	read := 0
 	req := &Request{
-		Initialised: true,
+		CurrentParserState: stateRequestLine,
+		Headers:            headers.NewHeaders(),
 	}
 
-	for !req.Done {
-		if len(buffer) == cap(buffer) {
+	for req.CurrentParserState != stateDone {
+		// on the previous loop, if buffer was reallocated to meet the length of unparsed bytes then size of buffer will be doubled
+		if read == cap(buffer) {
 			newBuffer := make([]byte, 2*len(buffer))
 			copy(newBuffer, buffer)
 			buffer = newBuffer
@@ -105,7 +125,7 @@ func RequestParser(reader io.Reader) (*Request, error) {
 			return nil, err
 		}
 		if err == io.EOF {
-			req.Done = true
+			req.CurrentParserState = stateDone
 			break
 		}
 		read += bytesRead
@@ -114,6 +134,7 @@ func RequestParser(reader io.Reader) (*Request, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		// if bytesParsed > 0, this will always turn buffer into an empty slice
 		copy(buffer, buffer[bytesParsed:read])
 		read -= bytesParsed
