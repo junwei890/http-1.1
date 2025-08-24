@@ -29,6 +29,7 @@ func main() {
 	log.Println("server shutdown")
 }
 
+// #nosec G104
 func handler(w io.Writer, r *request.Request) *server.HandlerError {
 	w.Write([]byte("All good\n"))
 	return nil

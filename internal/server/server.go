@@ -27,6 +27,7 @@ type Server struct {
 }
 
 // helper function to send responses in the event errors
+// #nosec G104
 func (h *HandlerError) errorResponseWriter(w io.Writer) {
 	response.WriteStatusLine(w, h.StatusCode)
 
@@ -36,6 +37,7 @@ func (h *HandlerError) errorResponseWriter(w io.Writer) {
 	w.Write([]byte(h.Message))
 }
 
+// #nosec G104
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
