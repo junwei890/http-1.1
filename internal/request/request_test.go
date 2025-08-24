@@ -30,7 +30,7 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func TestRequestLineParse(t *testing.T) {
+func TestRequestLineHeaderParse(t *testing.T) {
 	// test: good get request line, no headers
 	reader := &chunkReader{
 		data:            "GET / HTTP/1.1\r\n\r\n",
@@ -142,4 +142,58 @@ func TestRequestLineParse(t *testing.T) {
 	}
 	_, err = RequestParser(reader)
 	require.Error(t, err)
+}
+
+func TestBodyParse(t *testing.T) {
+	// test: valid body and content length
+	reader := &chunkReader{
+		data:            "GET /cats HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 12\r\n\r\nhello world\n",
+		numBytesPerRead: 4,
+	}
+	r, err := RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "hello world\n", string(r.Body))
+	assert.Equal(t, 12, len(r.Body))
+
+	// test: empty body with no content length
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\n\r\n",
+		numBytesPerRead: 8,
+	}
+	r, err = RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "", string(r.Body))
+	assert.Equal(t, 0, len(r.Body))
+
+	// test: empty body with content length
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 0\r\n\r\n",
+		numBytesPerRead: 8,
+	}
+	r, err = RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "", string(r.Body))
+	assert.Equal(t, 0, len(r.Body))
+
+	// test: incomplete request
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 69\r\n\r\nhello world\n",
+		numBytesPerRead: 16,
+	}
+	_, err = RequestParser(reader)
+	require.Error(t, err)
+
+	// test: no content length but body exists
+	reader = &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\n\r\nhello world\n",
+		numBytesPerRead: 16,
+	}
+	r, err = RequestParser(reader)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	assert.Equal(t, "", string(r.Body))
+	assert.Equal(t, 0, len(r.Body))
 }
