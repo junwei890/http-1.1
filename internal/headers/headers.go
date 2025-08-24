@@ -15,7 +15,6 @@ func NewHeaders() Headers {
 	return map[string]string{}
 }
 
-// called continuously until done is true
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	parts := strings.Split(string(data), "\r\n")
 	if len(parts) < 2 {
@@ -27,7 +26,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 2, true, nil
 	}
 
-	// host:localhost:42069 is valid
+	// no whitespace between field name, colon and field value is valid
 	headerParts := strings.SplitN(parts[0], ":", 2)
 	if len(headerParts) != 2 {
 		return 0, false, fmt.Errorf("field name or field value missing: %s", parts[0])
@@ -41,6 +40,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("invalid character in field name detected: %s", key)
 	}
 
+	// duplicate field names are valid
 	if _, ok := h[key]; ok {
 		newValue := fmt.Sprintf("%s, %s", h[key], strings.TrimSpace(headerParts[1]))
 		h[key] = newValue
@@ -53,6 +53,13 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return len(parts[0]) + 4, true, nil
 	}
 
-	// +2 to account for \r\n
 	return len(parts[0]) + 2, false, nil
+}
+
+func (h Headers) Get(key string) (string, error) {
+	if _, ok := h[strings.ToLower(key)]; !ok {
+		return "", fmt.Errorf("%s header does not exist", key)
+	}
+
+	return h[strings.ToLower(key)], nil
 }

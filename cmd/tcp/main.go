@@ -24,22 +24,26 @@ func main() {
 		}
 		fmt.Println("Connection accepted")
 
-		req, err := request.RequestParser(conn)
-		if err != nil {
-			log.Println(err)
-		}
+		go func(conn net.Conn) {
+			req, err := request.RequestParser(conn)
+			if err != nil {
+				log.Println(err)
+			}
 
-		fmt.Println("Request line:")
-		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
-		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
-		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
-		fmt.Println("Headers:")
-		for key, value := range req.Headers {
-			fmt.Printf("- %s: %s\n", key, value)
-		}
+			fmt.Println("Request line:")
+			fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+			fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+			fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
+			fmt.Println("Headers:")
+			for key, value := range req.Headers {
+				fmt.Printf("- %s: %s\n", key, value)
+			}
+			fmt.Println("Body:")
+			fmt.Printf("%s\n", string(req.Body))
 
-		if err := conn.Close(); err != nil {
-			log.Println(err)
-		}
+			if err := conn.Close(); err != nil {
+				log.Println(err)
+			}
+		}(conn)
 	}
 }
