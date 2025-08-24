@@ -11,27 +11,12 @@ import (
 	"github.com/junwei890/http-1.1/internal/headers"
 )
 
-type RequestLine struct {
-	HttpVersion   string
-	RequestTarget string
-	Method        string
-}
-
-type parserState string
-
 const (
 	stateRequestLine parserState = "request line"
 	stateHeaders     parserState = "headers"
 	stateBody        parserState = "body"
 	stateDone        parserState = "done"
 )
-
-type Request struct {
-	RequestLine        RequestLine
-	Headers            headers.Headers
-	Body               []byte
-	currentParserState parserState
-}
 
 var validMethods map[string]struct{} = map[string]struct{}{
 	"GET":     {},
@@ -43,6 +28,53 @@ var validMethods map[string]struct{} = map[string]struct{}{
 	"OPTIONS": {},
 	"CONNECT": {},
 	"TRACE":   {},
+}
+
+type parserState string
+
+type RequestLine struct {
+	HttpVersion   string
+	RequestTarget string
+	Method        string
+}
+
+type Request struct {
+	RequestLine        RequestLine
+	Headers            headers.Headers
+	Body               []byte
+	currentParserState parserState
+}
+
+func parseRequestLine(data []byte) (*RequestLine, int, error) {
+	requestParts := strings.Split(string(data), "\r\n")
+	if len(requestParts) < 2 {
+		return nil, 0, nil
+	}
+
+	// all 3 parts of a request line are required
+	requestLineParts := strings.Split(requestParts[0], " ")
+	if len(requestLineParts) != 3 {
+		return nil, 0, fmt.Errorf("request line requires 3 parts, only have %d", len(requestLineParts))
+	}
+
+	// formatting checks
+	if _, ok := validMethods[requestLineParts[0]]; !ok {
+		return nil, 0, fmt.Errorf("%s method not supported", requestLineParts[0])
+	}
+
+	if !strings.HasPrefix(requestLineParts[1], "/") {
+		return nil, 0, fmt.Errorf("%s is an invalid route", requestLineParts[1])
+	}
+
+	if requestLineParts[2] != "HTTP/1.1" {
+		return nil, 0, fmt.Errorf("%s is an unsupported protocol or version", requestLineParts[2])
+	}
+
+	return &RequestLine{
+		HttpVersion:   strings.Split(requestLineParts[2], "/")[1],
+		RequestTarget: requestLineParts[1],
+		Method:        requestLineParts[0],
+	}, len([]byte(requestParts[0])) + 2, nil
 }
 
 func (r *Request) parse(data []byte) (int, error) {
@@ -107,40 +139,8 @@ func (r *Request) parse(data []byte) (int, error) {
 	}
 }
 
-func parseRequestLine(data []byte) (*RequestLine, int, error) {
-	requestParts := strings.Split(string(data), "\r\n")
-	if len(requestParts) < 2 {
-		return nil, 0, nil
-	}
-
-	// all 3 parts of a request line are required
-	requestLineParts := strings.Split(requestParts[0], " ")
-	if len(requestLineParts) != 3 {
-		return nil, 0, fmt.Errorf("request line requires 3 parts, only have %d", len(requestLineParts))
-	}
-
-	// formatting checks
-	if _, ok := validMethods[requestLineParts[0]]; !ok {
-		return nil, 0, fmt.Errorf("%s method not supported", requestLineParts[0])
-	}
-
-	if !strings.HasPrefix(requestLineParts[1], "/") {
-		return nil, 0, fmt.Errorf("%s is an invalid route", requestLineParts[1])
-	}
-
-	if requestLineParts[2] != "HTTP/1.1" {
-		return nil, 0, fmt.Errorf("%s is an unsupported protocol or version", requestLineParts[2])
-	}
-
-	return &RequestLine{
-		HttpVersion:   strings.Split(requestLineParts[2], "/")[1],
-		RequestTarget: requestLineParts[1],
-		Method:        requestLineParts[0],
-	}, len([]byte(requestParts[0])) + 2, nil
-}
-
 func RequestParser(reader io.Reader) (*Request, error) {
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 8)
 	read := 0
 	req := &Request{
 		currentParserState: stateRequestLine,

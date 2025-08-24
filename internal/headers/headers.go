@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// regex to match characters not in set
 var regex = regexp.MustCompile(`[^a-z0-9!#$%&'*+\-.^_` + "`" + `|~]`)
 
 type Headers map[string]string
@@ -15,7 +14,7 @@ func NewHeaders() Headers {
 	return map[string]string{}
 }
 
-func (h Headers) Parse(data []byte) (n int, done bool, err error) {
+func (h Headers) Parse(data []byte) (int, bool, error) {
 	parts := strings.Split(string(data), "\r\n")
 	if len(parts) < 2 {
 		return 0, false, nil
