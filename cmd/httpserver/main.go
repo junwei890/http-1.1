@@ -1,13 +1,13 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/junwei890/http-1.1/internal/request"
+	"github.com/junwei890/http-1.1/internal/response"
 	"github.com/junwei890/http-1.1/internal/server"
 )
 
@@ -30,7 +30,24 @@ func main() {
 }
 
 // #nosec G104
-func handler(w io.Writer, r *request.Request) *server.HandlerError {
-	w.Write([]byte("All good\n"))
-	return nil
+func handler(w *response.Writer, r *request.Request) {
+	switch r.RequestLine.RequestTarget {
+	case "/":
+		w.WriteStatusLine(response.StatusOK)
+		responseBody := []byte(`<html>
+  <head>
+    <title>200 OK</title>
+  </head>
+  <body>
+    <h1>Hello</h1>
+    <p>Your request was an absolute banger.</p>
+  </body>
+</html>`)
+
+		headers := response.SetDefaultHeaders(len(responseBody))
+		response.OverrideDefaultHeaders(headers, "Content-Type", "text/html")
+		w.WriteHeaders(headers)
+
+		w.WriteBody(responseBody)
+	}
 }

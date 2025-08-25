@@ -1,6 +1,7 @@
 package headers
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -14,45 +15,39 @@ func NewHeaders() Headers {
 	return map[string]string{}
 }
 
-func (h Headers) Parse(data []byte) (int, bool, error) {
-	parts := strings.Split(string(data), "\r\n")
-	if len(parts) < 2 {
+func (h Headers) Parse(data []byte) (n int, done bool, err error) {
+	idx := bytes.Index(data, []byte("\r\n"))
+	if idx == -1 {
 		return 0, false, nil
 	}
-
-	// end of headers found
-	if parts[0] == "" {
+	if idx == 0 {
+		// end of headers found
 		return 2, true, nil
 	}
 
-	// no whitespace between field name, colon and field value is valid
-	headerParts := strings.SplitN(parts[0], ":", 2)
-	if len(headerParts) != 2 {
-		return 0, false, fmt.Errorf("field name or field value missing: %s", parts[0])
-	}
-	if strings.HasSuffix(headerParts[0], " ") {
-		return 0, false, fmt.Errorf("whitespace between field name and colon detected: %s", parts[0])
+	// 2 substrings because whitespace is optional
+	parts := bytes.SplitN(data[:idx], []byte(":"), 2)
+	key := strings.ToLower(string(parts[0]))
+	if key != strings.TrimRight(key, " ") {
+		// whitespace allowed only before field name
+		return 0, false, fmt.Errorf("whitespace between field name and colon detected: %s", key)
 	}
 
-	key := strings.ToLower(strings.TrimSpace(headerParts[0]))
-	if regex.MatchString(key) {
+	key = strings.TrimSpace(key)
+	value := strings.TrimSpace(string(parts[1]))
+
+	if regex.MatchString(strings.TrimSpace(key)) {
 		return 0, false, fmt.Errorf("invalid character in field name detected: %s", key)
 	}
 
-	// duplicate field names are valid
 	if _, ok := h[key]; ok {
-		newValue := fmt.Sprintf("%s, %s", h[key], strings.TrimSpace(headerParts[1]))
+		newValue := fmt.Sprintf("%s, %s", h[key], value)
 		h[key] = newValue
 	} else {
-		h[key] = strings.TrimSpace(headerParts[1])
+		h[key] = value
 	}
 
-	if len(parts) >= 3 && parts[1] == "" {
-		// if a header and the end of headers are on the same line
-		return len(parts[0]) + 4, true, nil
-	}
-
-	return len(parts[0]) + 2, false, nil
+	return idx + 2, false, nil
 }
 
 func (h Headers) Get(key string) (string, error) {
