@@ -112,6 +112,21 @@ func handler(w *response.Writer, r *request.Request) {
 		if err := w.WriteTrailers(trailers); err != nil {
 			log.Printf("couldn't write trailers for %s: %v", url, err)
 		}
+	} else if r.RequestLine.RequestTarget == "/image" {
+		// an endpoint to check if server supports binary data
+		file, err := os.ReadFile("./assets/panda.jpeg")
+		if err != nil {
+			errorResponseHandler(w, r, err)
+			return
+		}
+
+		w.WriteStatusLine(response.StatusOK)
+
+		headers := response.SetDefaultHeaders(len(file))
+		response.OverrideDefaultHeaders(headers, "Content-Type", "image/jpeg")
+		w.WriteHeaders(headers)
+
+		w.WriteBody(file)
 	}
 }
 
