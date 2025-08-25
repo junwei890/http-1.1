@@ -4,9 +4,23 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/junwei890/http-1.1/internal/headers"
 )
+
+type WriterState string
+
+const (
+	writingStatusLine WriterState = "status line"
+	writingHeaders    WriterState = "headers"
+	writingBody       WriterState = "body"
+)
+
+type Writer struct {
+	Response    io.Writer
+	writerState WriterState
+}
 
 type StatusCode int
 
@@ -20,35 +34,47 @@ const (
 	StatusInternalServerError StatusCode = 500
 )
 
-func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{
+		Response:    w,
+		writerState: writingStatusLine,
+	}
+}
+
+func (w *Writer) WriteStatusLine(statusCode StatusCode) error {
+	if w.writerState != writingStatusLine {
+		return fmt.Errorf("writing status line while in %s state", w.writerState)
+	}
+	defer func() { w.writerState = writingHeaders }()
+
 	switch statusCode {
 	case 200:
-		if _, err := w.Write([]byte("HTTP/1.1 200 OK\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 200 OK\r\n")); err != nil {
 			return err
 		}
 	case 400:
-		if _, err := w.Write([]byte("HTTP/1.1 400 Bad Request\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 400 Bad Request\r\n")); err != nil {
 			return err
 		}
 	case 401:
-		if _, err := w.Write([]byte("HTTP/1.1 401 Unauthorized\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 401 Unauthorized\r\n")); err != nil {
 			return err
 		}
 	case 403:
-		if _, err := w.Write([]byte("HTTP/1.1 403 Forbidden\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 403 Forbidden\r\n")); err != nil {
 			return err
 		}
 	case 404:
-		if _, err := w.Write([]byte("HTTP/1.1 404 Not Found\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 404 Not Found\r\n")); err != nil {
 			return err
 		}
 	case 500:
-		if _, err := w.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n")); err != nil {
+		if _, err := w.Response.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n")); err != nil {
 			return err
 		}
 	default:
 		// there must be a space between status code and reason phrase even if reason phrase is absent
-		if _, err := w.Write(fmt.Appendf([]byte{}, "HTTP/1.1 %d \r\n", statusCode)); err != nil {
+		if _, err := w.Response.Write(fmt.Appendf([]byte{}, "HTTP/1.1 %d \r\n", statusCode)); err != nil {
 			return err
 		}
 	}
@@ -56,6 +82,7 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 	return nil
 }
 
+// default headers if none are set
 func SetDefaultHeaders(length int) headers.Headers {
 	headers := headers.NewHeaders()
 
@@ -66,17 +93,44 @@ func SetDefaultHeaders(length int) headers.Headers {
 	return headers
 }
 
-func WriteHeaders(w io.Writer, headers headers.Headers) error {
+// override defaults
+func OverrideDefaultHeaders(headers headers.Headers, fieldName, fieldValue string) {
+	for key := range headers {
+		if strings.EqualFold(key, fieldName) {
+			headers[key] = fieldValue
+		}
+	}
+}
+
+func (w *Writer) WriteHeaders(headers headers.Headers) error {
+	if w.writerState != writingHeaders {
+		return fmt.Errorf("writing headers while in %s state", w.writerState)
+	}
+	defer func() { w.writerState = writingBody }()
+
 	for key, value := range headers {
-		if _, err := w.Write(fmt.Appendf([]byte{}, "%s: %s\r\n", key, value)); err != nil {
+		if _, err := w.Response.Write(fmt.Appendf([]byte{}, "%s: %s\r\n", key, value)); err != nil {
 			return err
 		}
 	}
 
-	// extra \r\n after end of headers
-	if _, err := w.Write([]byte("\r\n")); err != nil {
+	// extra /r/n at the end of headers
+	if _, err := w.Response.Write([]byte("\r\n")); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (w *Writer) WriteBody(body []byte) (int, error) {
+	if w.writerState != writingBody {
+		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
+	}
+
+	n, err := w.Response.Write(body)
+	if err != nil {
+		return 0, err
+	}
+
+	return n, nil
 }
