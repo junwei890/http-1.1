@@ -4,22 +4,12 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 
 	"github.com/junwei890/http-1.1/internal/headers"
 )
 
-type WriterState string
-
-const (
-	writingStatusLine WriterState = "status line"
-	writingHeaders    WriterState = "headers"
-	writingBody       WriterState = "body"
-)
-
 type Writer struct {
-	Response    io.Writer
-	writerState WriterState
+	Response io.Writer
 }
 
 type StatusCode int
@@ -36,17 +26,11 @@ const (
 
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{
-		Response:    w,
-		writerState: writingStatusLine,
+		Response: w,
 	}
 }
 
 func (w *Writer) WriteStatusLine(statusCode StatusCode) error {
-	if w.writerState != writingStatusLine {
-		return fmt.Errorf("writing status line while in %s state", w.writerState)
-	}
-	defer func() { w.writerState = writingHeaders }()
-
 	switch statusCode {
 	case 200:
 		if _, err := w.Response.Write([]byte("HTTP/1.1 200 OK\r\n")); err != nil {
@@ -102,19 +86,10 @@ func OverrideDefaultHeaders(headers headers.Headers, fieldName, fieldValue strin
 		return
 	}
 
-	for key := range headers {
-		if strings.EqualFold(key, fieldName) {
-			headers[key] = fieldValue
-		}
-	}
+	headers[fieldName] = fieldValue
 }
 
 func (w *Writer) WriteHeaders(headers headers.Headers) error {
-	if w.writerState != writingHeaders {
-		return fmt.Errorf("writing headers while in %s state", w.writerState)
-	}
-	defer func() { w.writerState = writingBody }()
-
 	for key, value := range headers {
 		if _, err := w.Response.Write(fmt.Appendf([]byte{}, "%s: %s\r\n", key, value)); err != nil {
 			return err
@@ -130,10 +105,6 @@ func (w *Writer) WriteHeaders(headers headers.Headers) error {
 }
 
 func (w *Writer) WriteBody(body []byte) (int, error) {
-	if w.writerState != writingBody {
-		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
-	}
-
 	n, err := w.Response.Write(body)
 	if err != nil {
 		return 0, err
@@ -144,10 +115,6 @@ func (w *Writer) WriteBody(body []byte) (int, error) {
 
 // writes chunks as it is received
 func (w *Writer) WriteChunkedBody(body []byte) (int, error) {
-	if w.writerState != writingBody {
-		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
-	}
-
 	n := 0
 	// length of chunk should be in hexadecimal
 	bytesWritten, err := w.Response.Write(fmt.Appendf([]byte{}, "%X\r\n", len(body)))
@@ -172,16 +139,28 @@ func (w *Writer) WriteChunkedBody(body []byte) (int, error) {
 	return n, nil
 }
 
-// this ends the entire chunked body with a 0 length of chunk and a terminating \r\n
+// this ends the entire chunked body with a 0 length of chunk
 func (w *Writer) WriteChunkedBodyDone() (int, error) {
-	if w.writerState != writingBody {
-		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
-	}
-
-	n, err := w.Response.Write([]byte("0\r\n\r\n"))
+	n, err := w.Response.Write([]byte("0\r\n"))
 	if err != nil {
 		return 0, err
 	}
 
 	return n, err
+}
+
+// optional trailers after the chunked body
+func (w *Writer) WriteTrailers(trailers headers.Headers) error {
+	for key, value := range trailers {
+		if _, err := w.Response.Write([]byte(fmt.Appendf([]byte{}, "%s: %s\r\n", key, value))); err != nil {
+			return err
+		}
+	}
+
+	// terminating \r\n
+	if _, err := w.Response.Write([]byte("\r\n")); err != nil {
+		return err
+	}
+
+	return nil
 }
