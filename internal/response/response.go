@@ -93,8 +93,15 @@ func SetDefaultHeaders(length int) headers.Headers {
 	return headers
 }
 
-// override defaults
+// override default response headers
 func OverrideDefaultHeaders(headers headers.Headers, fieldName, fieldValue string) {
+	// if response body is chunked encoded, content length header should be replaced
+	if fieldName == "Transfer-Encoding" && fieldValue == "chunked" {
+		delete(headers, "Content-Length")
+		headers[fieldName] = fieldValue
+		return
+	}
+
 	for key := range headers {
 		if strings.EqualFold(key, fieldName) {
 			headers[key] = fieldValue
@@ -133,4 +140,48 @@ func (w *Writer) WriteBody(body []byte) (int, error) {
 	}
 
 	return n, nil
+}
+
+// writes chunks as it is received
+func (w *Writer) WriteChunkedBody(body []byte) (int, error) {
+	if w.writerState != writingBody {
+		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
+	}
+
+	n := 0
+	// length of chunk should be in hexadecimal
+	bytesWritten, err := w.Response.Write(fmt.Appendf([]byte{}, "%X\r\n", len(body)))
+	if err != nil {
+		return 0, err
+	}
+	n += bytesWritten
+
+	bytesWritten, err = w.Response.Write(body)
+	if err != nil {
+		return 0, err
+	}
+	n += bytesWritten
+
+	// always end chunk with \r\n
+	bytesWritten, err = w.Response.Write([]byte("\r\n"))
+	if err != nil {
+		return 0, err
+	}
+	n += bytesWritten
+
+	return n, nil
+}
+
+// this ends the entire chunked body with a 0 length of chunk and a terminating \r\n
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.writerState != writingBody {
+		return 0, fmt.Errorf("writing body while in %s state", w.writerState)
+	}
+
+	n, err := w.Response.Write([]byte("0\r\n\r\n"))
+	if err != nil {
+		return 0, err
+	}
+
+	return n, err
 }

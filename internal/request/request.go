@@ -47,49 +47,6 @@ var validMethods map[string]struct{} = map[string]struct{}{
 	"TRACE":   {},
 }
 
-func RequestParser(reader io.Reader) (*Request, error) {
-	buffer := make([]byte, 8)
-	read := 0
-	req := &Request{
-		state:   parsingRequestLine,
-		Headers: headers.NewHeaders(),
-	}
-
-	for req.state != parsingDone {
-		// if there is the case of multiple reads without parsing and the buffer is full
-		if read >= len(buffer) {
-			newBuffer := make([]byte, len(buffer)*2)
-			copy(newBuffer, buffer)
-			buffer = newBuffer
-		}
-
-		// read into section after unparsed bytes
-		bytesRead, err := reader.Read(buffer[read:])
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if req.state != parsingDone {
-					// for when content length specified is larger than length of body received
-					return nil, errors.New("incomplete request")
-				}
-				break
-			}
-			return nil, err
-		}
-		read += bytesRead
-
-		// try to parse the buffer
-		bytesParsed, err := req.parse(buffer[:read])
-		if err != nil {
-			return nil, err
-		}
-		// if anything is parsed, parsed bytes are cleaned
-		copy(buffer, buffer[bytesParsed:])
-		read -= bytesParsed
-	}
-
-	return req, nil
-}
-
 // only parses when it receives the entire request line
 func parseRequestLine(data []byte) (*RequestLine, int, error) {
 	i := bytes.Index(data, []byte("\r\n"))
@@ -198,3 +155,45 @@ func (r *Request) parseHelper(data []byte) (int, error) {
 	}
 }
 
+func RequestParser(reader io.Reader) (*Request, error) {
+	buffer := make([]byte, 8)
+	read := 0
+	req := &Request{
+		state:   parsingRequestLine,
+		Headers: headers.NewHeaders(),
+	}
+
+	for req.state != parsingDone {
+		// if there is the case of multiple reads without parsing and the buffer is full
+		if read >= len(buffer) {
+			newBuffer := make([]byte, len(buffer)*2)
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
+
+		// read into section after unparsed bytes
+		bytesRead, err := reader.Read(buffer[read:])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if req.state != parsingDone {
+					// for when content length specified is larger than length of body received
+					return nil, fmt.Errorf("eof hit without receiving full content length specified")
+				}
+				break
+			}
+			return nil, err
+		}
+		read += bytesRead
+
+		// try to parse the buffer
+		bytesParsed, err := req.parse(buffer[:read])
+		if err != nil {
+			return nil, err
+		}
+		// if anything is parsed, parsed bytes are cleaned
+		copy(buffer, buffer[bytesParsed:])
+		read -= bytesParsed
+	}
+
+	return req, nil
+}
