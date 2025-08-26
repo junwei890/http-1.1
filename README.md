@@ -23,7 +23,7 @@ go run ./cmd/httpserver
 ## Usage
 I've only written 3 endpoints for the server, them being `/`, `/httpbin/{}` and `/image`.
 
-### / endpoint
+### /
 This endpoint was written to test out my parser and writer with a basic GET request on a real network connection.
 
 **With the server running**, in your preferred browser, head to [http://localhost:42069/](http://localhost:42069/), you should see this:
@@ -31,10 +31,10 @@ This endpoint was written to test out my parser and writer with a basic GET requ
 
 If you would like to see the response in the terminal instead, **with the server running**, run the following in a separate terminal:
 ```
-curl -v http://localhost/42069
+curl -v http://localhost:42069
 ```
 
-### /httpbin/{} endpoint
+### /httpbin/{}
 This endpoint acts as a proxy to [httpbin.org](https://httpbin.org/) and was written to test out my server's ability to respond with a chunked encoded body and trailers.
 
 To be able to use this endpoint, **with the server running**, run the following in a separate terminal:
